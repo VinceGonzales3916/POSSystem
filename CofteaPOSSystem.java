@@ -180,7 +180,6 @@ public class CofteaPOSSystem {
         }
 
         // All drinks qualify for the Senior/PWD discount.
-        // Change this if some items should be excluded later.
         boolean isDiscountEligible() {
             return true;
         }
@@ -321,7 +320,6 @@ public class CofteaPOSSystem {
         addOnPrices.put("Yakult", 15);
 
         // Compatibility per drink.
-        // Edit this list to change which add-ons a drink can have.
 
         // CAFE LATTE
         defineAddOns("CAFE LATTE", "Original Latte",
