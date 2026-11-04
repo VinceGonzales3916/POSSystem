@@ -19,8 +19,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Period;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -29,10 +33,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class CofteaPOSSystem {
 
-    // 1. MAIN METHOD
+    
     public static void main(String[] args) {
 
         SwingUtilities.invokeLater(() -> {
@@ -45,7 +50,7 @@ public class CofteaPOSSystem {
 
         });
     }
-    // 2. COLORS AND SHARED VARIABLES
+    
     private final Color black = new Color(25, 25, 25);
     private final Color white = Color.WHITE;
     private final Color blue = new Color(53, 179, 242);
@@ -66,7 +71,7 @@ public class CofteaPOSSystem {
 
     private JPanel productPanel;
 
-    // ---- TAX AND DISCOUNT SETTINGS ----
+    
 
     private static final BigDecimal VAT_RATE =
         new BigDecimal("0.12");
@@ -78,6 +83,29 @@ public class CofteaPOSSystem {
         new BigDecimal("0.20");
 
     private static final boolean PRICES_INCLUDE_VAT = false;
+
+    
+
+    
+    
+    private static final String DISCOUNT_NONE = "None";
+    private static final String DISCOUNT_SENIOR = "Senior Citizen";
+    private static final String DISCOUNT_PWD = "PWD";
+
+    
+    private static final String NO_DISCOUNT_LABEL = "No Discount";
+
+    
+    private static final String PAYMENT_CASH = "CASH";
+    private static final String PAYMENT_CASHLESS = "CASHLESS";
+
+    
+    private static final int SENIOR_MIN_AGE = 60;
+
+    
+    
+    private static final String DEMO_PWD_ID = "13-7501-177-0000001";
+    private static final String DEMO_CASHLESS_REFERENCE = "015507471050";
 
     private final List<OrderLine> orderLines =
         new ArrayList<>();
@@ -102,14 +130,14 @@ public class CofteaPOSSystem {
     private final Map<String, String[]> availableAddOns =
         new LinkedHashMap<>();
 
-    // Add-ons the cashier selected for each individual drink.
-    // Key format: CATEGORY|Product  (so add-ons never leak to other drinks)
+    
+    
     private final Map<String, Set<String>> drinkAddOns =
         new LinkedHashMap<>();
 
-    // ==========================================
-    // 2. PENDING ITEM CLASS
-    // ==========================================
+    
+    
+    
 
     private class PendingItem {
 
@@ -117,7 +145,7 @@ public class CofteaPOSSystem {
         String size;
         int unitPrice;
         int quantity;
-        String drinkKey; // CATEGORY|Product, used to look up add-ons
+        String drinkKey; 
 
         PendingItem(
             String name,
@@ -138,19 +166,18 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 2B. ORDER DATA CLASSES
-    // ==========================================
+    
+    
+    
 
-    // One confirmed line in the dashboard order.
     private static class OrderLine {
 
         final String productName;
         final String size;
-        final String addOns;          // "Espresso, Pearls" or ""
+        final String addOns;          
         final int quantity;
-        final BigDecimal basePrice;   // drink price per cup
-        final BigDecimal addOnPrice;  // all add-ons per cup
+        final BigDecimal basePrice;   
+        final BigDecimal addOnPrice;  
 
         OrderLine(
             String productName,
@@ -172,19 +199,19 @@ public class CofteaPOSSystem {
             return basePrice.add(addOnPrice);
         }
 
-        // (drink + add-ons) x quantity, VAT included in the price
+        
         BigDecimal getLineTotal() {
             return getUnitPrice().multiply(
                 BigDecimal.valueOf(quantity)
             );
         }
 
-        // All drinks qualify for the Senior/PWD discount.
+        
         boolean isDiscountEligible() {
             return true;
         }
 
-        // Example: Original Latte (12 OZ - Espresso, Pearls)
+        
         String getDescription() {
 
             String details = size;
@@ -197,13 +224,13 @@ public class CofteaPOSSystem {
         }
     }
 
-    // The computed amounts shown in the cashout window.
+    
     private static class OrderSummary {
 
-        final BigDecimal subtotal; // VAT-exclusive amount
-        final BigDecimal tax;      // 12% VAT charged
-        final BigDecimal discount; // Senior/PWD discount
-        final BigDecimal total;    // subtotal + tax - discount
+        final BigDecimal subtotal; 
+        final BigDecimal tax;      
+        final BigDecimal discount; 
+        final BigDecimal total;    
 
         OrderSummary(
             BigDecimal subtotal,
@@ -218,8 +245,10 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Complete record of one paid transaction.
-    // The receipt will be generated from this data.
+    
+    
+    
+    
     private static class TransactionRecord {
 
         final int transactionNumber;
@@ -229,8 +258,9 @@ public class CofteaPOSSystem {
         final BigDecimal tax;
         final BigDecimal discount;
         final BigDecimal total;
-        final String discountType;   // NONE, SENIOR CARD, VALID ID
-        final String paymentMethod;  // CASH or CREDIT
+        final String discountCategory;   
+        final String paymentMethod;      
+        final String cashlessReference;  
         final BigDecimal amountReceived;
         final BigDecimal change;
 
@@ -239,8 +269,9 @@ public class CofteaPOSSystem {
             LocalDateTime dateTime,
             List<OrderLine> items,
             OrderSummary summary,
-            String discountType,
+            String discountCategory,
             String paymentMethod,
+            String cashlessReference,
             BigDecimal amountReceived,
             BigDecimal change
         ) {
@@ -251,16 +282,17 @@ public class CofteaPOSSystem {
             this.tax = summary.tax;
             this.discount = summary.discount;
             this.total = summary.total;
-            this.discountType = discountType;
+            this.discountCategory = discountCategory;
             this.paymentMethod = paymentMethod;
+            this.cashlessReference = cashlessReference;
             this.amountReceived = amountReceived;
             this.change = change;
         }
     }
 
-    // ==========================================
-    // 4. INITIALIZE PRODUCTS
-    // ==========================================
+    
+    
+    
 
     private void initializeProducts() {
 
@@ -305,13 +337,13 @@ public class CofteaPOSSystem {
         });
     }
 
-    // ==========================================
-    // 4B. INITIALIZE ADD-ONS
-    // ==========================================
+    
+    
+    
 
     private void initializeAddOns() {
 
-        // Prices
+        
         addOnPrices.put("Espresso", 5);
         addOnPrices.put("Pearls", 5);
         addOnPrices.put("Nata", 5);
@@ -319,9 +351,9 @@ public class CofteaPOSSystem {
         addOnPrices.put("Popping Boba", 10);
         addOnPrices.put("Yakult", 15);
 
-        // Compatibility per drink.
+        
 
-        // CAFE LATTE
+        
         defineAddOns("CAFE LATTE", "Original Latte",
             "Espresso", "Pearls", "Nata", "Coffee Jelly");
         defineAddOns("CAFE LATTE", "Spanish Latte",
@@ -333,7 +365,7 @@ public class CofteaPOSSystem {
         defineAddOns("CAFE LATTE", "Red Velvet",
             "Pearls", "Nata", "Coffee Jelly");
 
-        // AMERIKANO
+        
         defineAddOns("AMERIKANO", "Original",
             "Espresso", "Nata", "Coffee Jelly");
         defineAddOns("AMERIKANO", "Caramel Macchiato",
@@ -345,7 +377,7 @@ public class CofteaPOSSystem {
         defineAddOns("AMERIKANO", "Black Brepuccino",
             "Espresso", "Coffee Jelly");
 
-        // MILKTEA
+        
         defineAddOns("MILKTEA", "Okinawa",
             "Pearls", "Nata", "Coffee Jelly", "Popping Boba");
         defineAddOns("MILKTEA", "Wintermelon",
@@ -357,7 +389,7 @@ public class CofteaPOSSystem {
         defineAddOns("MILKTEA", "Red Velvet",
             "Pearls", "Nata", "Popping Boba");
 
-        // FRUIT SERIES
+        
         defineAddOns("FRUIT SERIES", "Green Apple",
             "Nata", "Popping Boba", "Yakult");
         defineAddOns("FRUIT SERIES", "Blueberry",
@@ -369,7 +401,7 @@ public class CofteaPOSSystem {
         defineAddOns("FRUIT SERIES", "Strawberry",
             "Nata", "Popping Boba", "Yakult");
 
-        // FRAPPE
+        
         defineAddOns("FRAPPE", "Java Chip",
             "Espresso", "Pearls", "Nata", "Coffee Jelly");
         defineAddOns("FRAPPE", "Vanilla Espresso",
@@ -392,9 +424,9 @@ public class CofteaPOSSystem {
         );
     }
 
-    // ==========================================
-    // 5. DASHBOARD UI
-    // ==========================================
+    
+    
+    
 
     private void createDashboardUI() {
 
@@ -410,7 +442,7 @@ public class CofteaPOSSystem {
 
         dashboardFrame.setLayout(new BorderLayout());
 
-        // HEADER
+        
 
         JPanel headerPanel = new JPanel(
             new GridBagLayout()
@@ -479,7 +511,7 @@ public class CofteaPOSSystem {
             headerPanel, BorderLayout.NORTH
         );
 
-        // MAIN CONTENT
+        
 
         JPanel mainPanel = new JPanel(
             new GridBagLayout()
@@ -494,7 +526,7 @@ public class CofteaPOSSystem {
         mainGbc.weighty = 1.0;
         mainGbc.fill = GridBagConstraints.BOTH;
 
-        // LEFT SIDE - ORDER TABLE
+        
 
         JPanel leftPanel = new JPanel(
             new BorderLayout()
@@ -513,7 +545,7 @@ public class CofteaPOSSystem {
 
         mainPanel.add(leftPanel, mainGbc);
 
-        // RIGHT SIDE - CONTROLS
+        
 
         JPanel rightPanel = new JPanel(
             new GridBagLayout()
@@ -528,7 +560,7 @@ public class CofteaPOSSystem {
         rightGbc.weightx = 1.0;
         rightGbc.insets = new Insets(12, 15, 12, 15);
 
-        // MENU AND REMOVE BUTTONS
+        
 
         JPanel topButtonsPanel = new JPanel(
             new GridLayout(1, 2, 20, 0)
@@ -561,7 +593,7 @@ public class CofteaPOSSystem {
 
         rightPanel.add(topButtonsPanel, rightGbc);
 
-        // CHECKOUT BUTTON
+        
 
         JButton checkoutButton = createDashboardButton(
             "CHECK OUT", green
@@ -576,7 +608,7 @@ public class CofteaPOSSystem {
 
         rightPanel.add(checkoutButton, rightGbc);
 
-        // SUBTOTAL PANEL
+        
 
         JPanel subtotalPanel = new JPanel(
             new BorderLayout()
@@ -625,9 +657,9 @@ public class CofteaPOSSystem {
         dashboardFrame.setVisible(true);
     }
 
-    // ==========================================
-    // 6. ORDER TABLE UI
-    // ==========================================
+    
+    
+    
 
     private JPanel createOrderTable() {
 
@@ -710,13 +742,13 @@ public class CofteaPOSSystem {
         return panel;
     }
 
-    // ==========================================
-    // 7. MENU WINDOW
-    // ==========================================
+    
+    
+    
 
     private void openMenuWindow() {
 
-        // Prevent multiple menu windows
+        
 
         if (menuFrame != null && menuFrame.isDisplayable()) {
 
@@ -744,7 +776,7 @@ public class CofteaPOSSystem {
 
         menuFrame.setLayout(new BorderLayout());
 
-        // MENU HEADER
+        
 
         JPanel menuHeader = new JPanel(
             new GridBagLayout()
@@ -765,7 +797,7 @@ public class CofteaPOSSystem {
         GridBagConstraints headerGbc =
             new GridBagConstraints();
 
-        // CART ICON
+        
 
         JLabel cartIcon = new JLabel("🛒");
 
@@ -781,7 +813,7 @@ public class CofteaPOSSystem {
 
         menuHeader.add(cartIcon, headerGbc);
 
-        // ADDED ITEMS COUNTER
+        
 
         addedItemsLabel = new JLabel(
             "ADDED ITEM/S: " + pendingOrder.size()
@@ -800,7 +832,7 @@ public class CofteaPOSSystem {
             addedItemsLabel, headerGbc
         );
 
-        // SPACER
+        
 
         headerGbc.gridx = 2;
         headerGbc.weightx = 1.0;
@@ -809,7 +841,7 @@ public class CofteaPOSSystem {
             Box.createHorizontalGlue(), headerGbc
         );
 
-        // TITLE
+        
 
         JLabel menuTitle = new JLabel(
             "COF/TEA MENU"
@@ -827,7 +859,7 @@ public class CofteaPOSSystem {
 
         menuHeader.add(menuTitle, headerGbc);
 
-        // SPACER
+        
 
         headerGbc.gridx = 4;
         headerGbc.weightx = 1.0;
@@ -836,7 +868,7 @@ public class CofteaPOSSystem {
             Box.createHorizontalGlue(), headerGbc
         );
 
-        // CATEGORY LABEL
+        
 
         categoryLabel = new JLabel(
             "CAFE LATTE"
@@ -860,7 +892,7 @@ public class CofteaPOSSystem {
             menuHeader, BorderLayout.NORTH
         );
 
-        // MENU BODY
+        
 
         JPanel menuBody = new JPanel(
             new BorderLayout()
@@ -868,7 +900,7 @@ public class CofteaPOSSystem {
 
         menuBody.setBackground(white);
 
-        // CATEGORY SIDEBAR
+        
 
         JPanel sidebar = new JPanel(
             new BorderLayout()
@@ -892,7 +924,7 @@ public class CofteaPOSSystem {
             )
         );
 
-        // PRODUCT DISPLAY AREA
+        
 
         productPanel = new JPanel(
             new GridLayout(0, 2, 8, 8)
@@ -906,7 +938,7 @@ public class CofteaPOSSystem {
             )
         );
 
-        // INITIAL CATEGORY
+        
 
         String initialCategory = "CAFE LATTE";
 
@@ -914,7 +946,7 @@ public class CofteaPOSSystem {
             initialCategory
         );
 
-        // CATEGORY BUTTONS
+        
 
         for (String category : products.keySet()) {
 
@@ -936,7 +968,7 @@ public class CofteaPOSSystem {
             categoryPanel, BorderLayout.NORTH
         );
 
-        // ADD ORDER BUTTON
+        
 
         JButton addOrderButton = createDashboardButton(
             "ADD ORDER", green
@@ -970,7 +1002,7 @@ public class CofteaPOSSystem {
             bottomButtonPanel, BorderLayout.SOUTH
         );
 
-        // SCROLLABLE PRODUCT DISPLAY
+        
 
         JScrollPane productScrollPane =
             new JScrollPane(productPanel);
@@ -989,7 +1021,7 @@ public class CofteaPOSSystem {
         productScrollPane.getViewport()
             .setBackground(white);
 
-        // ADD COMPONENTS
+        
 
         menuBody.add(
             sidebar, BorderLayout.WEST
@@ -1006,9 +1038,9 @@ public class CofteaPOSSystem {
         menuFrame.setVisible(true);
     }
 
-    // ==========================================
-    // 8. UPDATE PRODUCT DISPLAY
-    // ==========================================
+    
+    
+    
 
     private void updateProductDisplay(String category) {
 
@@ -1032,18 +1064,18 @@ public class CofteaPOSSystem {
         productPanel.repaint();
     }
 
-    // ==========================================
-    // 9. PRODUCT CARD DESIGN
-    // ==========================================
+    
+    
+    
 
     private JPanel createProductCard(
         String category,
         String productName
     ) {
 
-        // Unique id for this exact drink. Needed because some names
-        // (Red Velvet, Strawberry, Cookies & Cream) exist in more
-        // than one category.
+        
+        
+        
         final String drinkKey = category + "|" + productName;
 
         JPanel card = new JPanel(
@@ -1058,7 +1090,7 @@ public class CofteaPOSSystem {
             )
         );
 
-        // PRODUCT TITLE
+        
 
         JLabel nameLabel = new JLabel(
             productName.toUpperCase(),
@@ -1075,7 +1107,7 @@ public class CofteaPOSSystem {
             nameLabel, BorderLayout.NORTH
         );
 
-        // PRODUCT OPTIONS
+        
 
         JPanel optionsPanel = new JPanel(
             new GridBagLayout()
@@ -1089,7 +1121,7 @@ public class CofteaPOSSystem {
         gbc.insets = new Insets(3, 4, 3, 4);
         gbc.fill = GridBagConstraints.BOTH;
 
-        // SIZE OPTIONS
+        
 
         JPanel sizesPanel = new JPanel(
             new GridLayout(1, 3, 5, 0)
@@ -1105,7 +1137,7 @@ public class CofteaPOSSystem {
             39, 49, 59
         };
 
-        // QUANTITY AND ADD-ONS
+        
 
         JPanel quantityPanel = new JPanel(
             new GridLayout(3, 1, 0, 5)
@@ -1134,7 +1166,7 @@ public class CofteaPOSSystem {
             new Dimension(125, 55)
         );
 
-        // ADD-ONS BUTTON
+        
 
         JButton addOnsButton = new JButton(
             "ADD-ONS"
@@ -1155,8 +1187,8 @@ public class CofteaPOSSystem {
             new Cursor(Cursor.HAND_CURSOR)
         );
 
-        // Show the saved add-on state for this drink
-        // (e.g. when coming back from another category)
+        
+        
         refreshAddOnsButton(addOnsButton, drinkKey);
 
         addOnsButton.addActionListener(e -> {
@@ -1169,7 +1201,7 @@ public class CofteaPOSSystem {
         quantityPanel.add(quantitySpinner);
         quantityPanel.add(addOnsButton);
 
-        // SIZE BUTTONS
+        
 
         for (int i = 0; i < sizes.length; i++) {
 
@@ -1203,7 +1235,7 @@ public class CofteaPOSSystem {
                 new Font("Arial", Font.BOLD, 18)
             );
 
-            // Larger circular selection button
+            
 
             CircleSelectionButton sizeButton =
                 new CircleSelectionButton();
@@ -1224,7 +1256,7 @@ public class CofteaPOSSystem {
                 new Cursor(Cursor.HAND_CURSOR)
             );
 
-            // Restore selection when switching categories
+            
 
             PendingItem existingItem =
                 pendingOrder.get(itemKey);
@@ -1238,13 +1270,13 @@ public class CofteaPOSSystem {
                 );
             }
 
-            // SELECT OR DESELECT SIZE
+            
 
             sizeButton.addActionListener(e -> {
 
                 if (sizeButton.isSelected()) {
 
-                    // Remove selection
+                    
 
                     sizeButton.setSelected(false);
 
@@ -1252,7 +1284,7 @@ public class CofteaPOSSystem {
 
                 } else {
 
-                    // Add selection
+                    
 
                     sizeButton.setSelected(true);
 
@@ -1276,7 +1308,7 @@ public class CofteaPOSSystem {
                 updateAddedItemsCounter();
             });
 
-            // UPDATE QUANTITY IF ITEM IS ALREADY SELECTED
+            
 
             quantitySpinner.addChangeListener(e -> {
 
@@ -1298,7 +1330,7 @@ public class CofteaPOSSystem {
             sizesPanel.add(sizeOption);
         }
 
-        // ADD SIZE AND QUANTITY PANELS
+        
 
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -1320,13 +1352,13 @@ public class CofteaPOSSystem {
         card.setPreferredSize(
             new Dimension(400, 220)
         );
-
+            
         return card;
     }
 
-    // ==========================================
-    // 9B. ADD-ONS WINDOW
-    // ==========================================
+    
+    
+    
 
     private void openAddOnsDialog(
         String productName,
@@ -1357,14 +1389,14 @@ public class CofteaPOSSystem {
 
         dialog.setUndecorated(true);
 
-        // Transparent corners (falls back to square if unsupported)
+        
         try {
             dialog.setBackground(new Color(0, 0, 0, 0));
         } catch (UnsupportedOperationException ex) {
-            // ignore
+            
         }
 
-        // OUTER ROUNDED WINDOW
+        
 
         RoundedPanel root = new RoundedPanel(
             white, Color.BLACK, 3, 30
@@ -1376,7 +1408,7 @@ public class CofteaPOSSystem {
             BorderFactory.createEmptyBorder(8, 14, 16, 14)
         );
 
-        // HEADER
+        
 
         RoundedPanel header = new RoundedPanel(
             black, null, 0, 24
@@ -1395,7 +1427,7 @@ public class CofteaPOSSystem {
 
         root.add(header, BorderLayout.NORTH);
 
-        // ADD-ON ROWS (only add-ons compatible with this drink)
+        
 
         JPanel rowsPanel = new JPanel(
             new GridLayout(available.length, 1, 0, 4)
@@ -1446,7 +1478,7 @@ public class CofteaPOSSystem {
 
         root.add(rowsPanel, BorderLayout.CENTER);
 
-        // BUTTONS
+        
 
         JPanel buttonsPanel = new JPanel(
             new GridLayout(1, 2, 28, 0)
@@ -1470,7 +1502,7 @@ public class CofteaPOSSystem {
 
             Set<String> chosen = new LinkedHashSet<>();
 
-            // Keep the same order as shown in the window
+            
             for (Map.Entry<String, PillToggle> entry
                 : toggles.entrySet()) {
 
@@ -1514,8 +1546,8 @@ public class CofteaPOSSystem {
         dialog.setVisible(true);
     }
 
-    // Updates the card's ADD-ONS button so the cashier can see
-    // whether this drink has add-ons (button turns dark + tooltip).
+    
+    
     private void refreshAddOnsButton(
         JButton button,
         String drinkKey
@@ -1537,9 +1569,9 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 10. UPDATE ADDED ITEMS COUNTER
-    // ==========================================
+    
+    
+    
 
     private void updateAddedItemsCounter() {
 
@@ -1551,9 +1583,9 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 11. CONFIRM ORDER
-    // ==========================================
+    
+    
+    
 
     private void confirmOrder() {
 
@@ -1580,24 +1612,24 @@ public class CofteaPOSSystem {
             return;
         }
 
-        // Transfer every selected product and size
-        // into the dashboard order table.
+        
+        
 
         for (PendingItem item : pendingOrder.values()) {
 
-            // Add-ons chosen for THIS drink only
+            
             Set<String> addOns = drinkAddOns.getOrDefault(
                 item.drinkKey, Collections.<String>emptySet()
             );
 
-            // Add-on price per cup
+            
             int addOnPerCup = 0;
 
             for (String addOn : addOns) {
                 addOnPerCup += addOnPrices.get(addOn);
             }
 
-            // (base price + add-ons) x quantity is computed by OrderLine
+            
             OrderLine line = new OrderLine(
                 item.name,
                 item.size,
@@ -1618,22 +1650,22 @@ public class CofteaPOSSystem {
 
         updateSubtotal();
 
-        // Clear pending selections after successful transfer
+        
 
         pendingOrder.clear();
         drinkAddOns.clear();
 
         updateAddedItemsCounter();
 
-        // Close menu and return to dashboard
+        
 
         menuFrame.dispose();
         menuFrame = null;
     }
 
-    // ==========================================
-    // 12. REMOVE SELECTED DASHBOARD ITEM
-    // ==========================================
+    
+    
+    
 
     private void removeSelectedItem() {
 
@@ -1658,9 +1690,9 @@ public class CofteaPOSSystem {
         updateSubtotal();
     }
 
-    // ==========================================
-    // 13. UPDATE SUBTOTAL
-    // ==========================================
+    
+    
+    
 
     private void updateSubtotal() {
 
@@ -1675,9 +1707,9 @@ public class CofteaPOSSystem {
         );
     }
 
-    // ==========================================
-    // 13B. CASHOUT (CHECK OUT) WINDOW
-    // ==========================================
+    
+    
+    
 
     private void openCheckoutWindow() {
 
@@ -1697,14 +1729,14 @@ public class CofteaPOSSystem {
 
         dialog.setUndecorated(true);
 
-        // Transparent corners (falls back to square if unsupported)
+        
         try {
             dialog.setBackground(new Color(0, 0, 0, 0));
         } catch (UnsupportedOperationException ex) {
-            // ignore
+            
         }
 
-        // OUTER ROUNDED WINDOW
+        
 
         RoundedPanel root = new RoundedPanel(
             white, Color.BLACK, 3, 30
@@ -1716,7 +1748,7 @@ public class CofteaPOSSystem {
             BorderFactory.createEmptyBorder(8, 14, 16, 14)
         );
 
-        // HEADER
+        
 
         RoundedPanel header = new RoundedPanel(
             black, null, 0, 24
@@ -1735,7 +1767,7 @@ public class CofteaPOSSystem {
 
         root.add(header, BorderLayout.NORTH);
 
-        // VALUE LABELS (filled in by refreshSummary)
+        
 
         JLabel subtotalValue = new JLabel();
         JLabel taxValue = new JLabel();
@@ -1745,19 +1777,49 @@ public class CofteaPOSSystem {
 
         changeValue.setForeground(green);
 
-        // INPUTS
+        
 
-        JComboBox<String> seniorCombo = new JComboBox<>(
-            new String[] { "SENIOR CARD", "VALID ID", "NO" }
+        
+        JComboBox<String> discountCombo = new JComboBox<>(
+            new String[] {
+                NO_DISCOUNT_LABEL, DISCOUNT_SENIOR, DISCOUNT_PWD
+            }
         );
 
-        styleComboBox(seniorCombo);
+        styleComboBox(discountCombo);
 
-        // Never apply the discount unless the cashier chooses it
-        seniorCombo.setSelectedItem("NO");
+        
+        
+        JComboBox<String> idTypeCombo = new JComboBox<>(
+            new String[] {
+                "SENIOR CITIZEN ID", "OTHER ACCEPTED VALID ID"
+            }
+        );
+
+        styleComboBox(idTypeCombo, 18);
+
+        JTextField birthDateField =
+            createTextInput(22, "[0-9/]{0,10}");
+
+        
+        JTextField pwdIdField =
+            createTextInput(22, "[0-9-]{0,19}");
+
+        
+        JTextField referenceField =
+            createTextInput(24, "[0-9]{0,20}");
+
+        RoundedButton validateSeniorButton = createValidateButton();
+        RoundedButton validatePwdButton = createValidateButton();
+
+        JLabel seniorStatus = createStatusLabel();
+        JLabel pwdStatus = createStatusLabel();
+
+        setStatus(seniorStatus, "NOT VALIDATED", red);
+        setStatus(pwdStatus, "NOT VALIDATED", red);
 
         JComboBox<String> paymentCombo = new JComboBox<>(
-            new String[] { "CASH", "CREDIT" }
+            new String[] { PAYMENT_CASH, PAYMENT_CASHLESS }
         );
 
         styleComboBox(paymentCombo);
@@ -1771,11 +1833,11 @@ public class CofteaPOSSystem {
         paymentField.setForeground(Color.BLACK);
         paymentField.setCaretColor(Color.BLACK);
 
-        // Only digits and up to 2 decimal places
+        
         ((AbstractDocument) paymentField.getDocument())
             .setDocumentFilter(new AmountFilter());
 
-        // BODY
+        
 
         JPanel body = new JPanel(new GridBagLayout());
 
@@ -1784,6 +1846,79 @@ public class CofteaPOSSystem {
         body.setBorder(
             BorderFactory.createEmptyBorder(8, 12, 8, 12)
         );
+
+        
+
+        JPanel seniorPanel = new JPanel(new GridBagLayout());
+
+        seniorPanel.setOpaque(false);
+        seniorPanel.setVisible(false);
+
+        seniorPanel.add(
+            createSubHeading("ID PRESENTED:"),
+            rowConstraints(0, new Insets(4, 4, 2, 4))
+        );
+
+        seniorPanel.add(
+            createInputBox(idTypeCombo, 50),
+            rowConstraints(1, new Insets(2, 4, 8, 4))
+        );
+
+        seniorPanel.add(
+            createSubHeading("BIRTH DATE (MM/DD/YYYY):"),
+            rowConstraints(2, new Insets(4, 4, 2, 4))
+        );
+
+        seniorPanel.add(
+            createEntryRow(birthDateField, validateSeniorButton),
+            rowConstraints(3, new Insets(2, 4, 2, 4))
+        );
+
+        seniorPanel.add(
+            seniorStatus,
+            rowConstraints(4, new Insets(2, 4, 8, 4))
+        );
+
+        
+
+        JPanel pwdPanel = new JPanel(new GridBagLayout());
+
+        pwdPanel.setOpaque(false);
+        pwdPanel.setVisible(false);
+
+        pwdPanel.add(
+            createSubHeading("PWD ID NUMBER:"),
+            rowConstraints(0, new Insets(4, 4, 2, 4))
+        );
+
+        pwdPanel.add(
+            createEntryRow(pwdIdField, validatePwdButton),
+            rowConstraints(1, new Insets(2, 4, 2, 4))
+        );
+
+        pwdPanel.add(
+            pwdStatus,
+            rowConstraints(2, new Insets(2, 4, 8, 4))
+        );
+
+        
+
+        JPanel cashlessPanel = new JPanel(new GridBagLayout());
+
+        cashlessPanel.setOpaque(false);
+        cashlessPanel.setVisible(false);
+
+        cashlessPanel.add(
+            createSubHeading("REFERENCE NUMBER:"),
+            rowConstraints(0, new Insets(4, 4, 2, 4))
+        );
+
+        cashlessPanel.add(
+            createInputBox(referenceField, 50),
+            rowConstraints(1, new Insets(2, 4, 8, 4))
+        );
+
+        
 
         GridBagConstraints g = new GridBagConstraints();
 
@@ -1806,13 +1941,25 @@ public class CofteaPOSSystem {
         body.add(createValueRow("TOTAL AMOUNT:", totalValue), g);
 
         g.gridy = row++;
+        body.add(createValueRow("DISCOUNT:", discountValue), g);
+
+        g.gridy = row++;
         body.add(
-            createValueRow("SENIOR DISCOUNT:", discountValue), g
+            createValueRow("SPECIALIZED DISCOUNT:", new JLabel()), g
         );
 
         g.gridy = row++;
         g.insets = new Insets(2, 4, 10, 4);
-        body.add(createInputBox(seniorCombo, 56), g);
+        body.add(createInputBox(discountCombo, 56), g);
+
+        
+        g.insets = new Insets(0, 0, 0, 0);
+
+        g.gridy = row++;
+        body.add(seniorPanel, g);
+
+        g.gridy = row++;
+        body.add(pwdPanel, g);
 
         g.gridy = row++;
         g.insets = new Insets(4, 4, 4, 4);
@@ -1824,6 +1971,11 @@ public class CofteaPOSSystem {
         g.insets = new Insets(2, 4, 10, 4);
         body.add(createInputBox(paymentCombo, 56), g);
 
+        
+        g.gridy = row++;
+        g.insets = new Insets(0, 0, 0, 0);
+        body.add(cashlessPanel, g);
+
         g.gridy = row++;
         g.insets = new Insets(4, 4, 4, 4);
         body.add(
@@ -1834,9 +1986,27 @@ public class CofteaPOSSystem {
         g.insets = new Insets(2, 4, 6, 4);
         body.add(createInputBox(paymentField, 56), g);
 
-        root.add(body, BorderLayout.CENTER);
+        
+        
+        JScrollPane bodyScroll = new JScrollPane(
+            body,
+            JScrollPane.VERTICAL_SCROLLBAR_NEVER,
+            JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        );
 
-        // BUTTONS
+        bodyScroll.setOpaque(false);
+        bodyScroll.setBorder(BorderFactory.createEmptyBorder());
+        bodyScroll.getViewport().setOpaque(false);
+
+        bodyScroll.getViewport().setScrollMode(
+            JViewport.SIMPLE_SCROLL_MODE
+        );
+
+        bodyScroll.getVerticalScrollBar().setUnitIncrement(20);
+
+        root.add(bodyScroll, BorderLayout.CENTER);
+
+        
 
         JPanel buttonsPanel = new JPanel(
             new GridLayout(1, 2, 24, 0)
@@ -1863,11 +2033,17 @@ public class CofteaPOSSystem {
 
         root.add(buttonsPanel, BorderLayout.SOUTH);
 
-        // ---- LIVE CALCULATION ----
+        
 
         final OrderSummary[] summary = new OrderSummary[1];
 
-        // Shows the change while the cashier types
+        
+        
+        final boolean[] discountValidated = new boolean[1];
+
+        
+
+        
         Runnable updateChange = () -> {
 
             BigDecimal received =
@@ -1888,15 +2064,13 @@ public class CofteaPOSSystem {
             }
         };
 
-        // Recalculates everything from the current order and
-        // the Senior/PWD selection
+        
+        
         Runnable refreshSummary = () -> {
 
-            boolean eligible =
-                !"NO".equals(seniorCombo.getSelectedItem());
-
-            OrderSummary s =
-                calculateSummary(orderLines, eligible);
+            OrderSummary s = calculateSummary(
+                orderLines, discountValidated[0]
+            );
 
             summary[0] = s;
 
@@ -1910,43 +2084,243 @@ public class CofteaPOSSystem {
                     : peso(s.discount)
             );
 
-            // Card payments are always the exact total
-            if ("CREDIT".equals(paymentCombo.getSelectedItem())) {
+            
+            if (PAYMENT_CASHLESS.equals(paymentCombo.getSelectedItem())) {
                 paymentField.setText(s.total.toPlainString());
             }
 
             updateChange.run();
         };
 
+        
+        Runnable resizeDialog = () -> {
+
+            Dimension bodySize = body.getPreferredSize();
+
+            int maxHeight = Math.max(
+                250,
+                GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getMaximumWindowBounds().height - 230
+            );
+
+            boolean scrolls = bodySize.height > maxHeight;
+
+            bodyScroll.setVerticalScrollBarPolicy(
+                scrolls
+                    ? JScrollPane.VERTICAL_SCROLLBAR_ALWAYS
+                    : JScrollPane.VERTICAL_SCROLLBAR_NEVER
+            );
+
+            int width = bodySize.width + (scrolls
+                ? bodyScroll.getVerticalScrollBar()
+                    .getPreferredSize().width
+                : 0);
+
+            bodyScroll.setPreferredSize(
+                new Dimension(
+                    width, Math.min(bodySize.height, maxHeight)
+                )
+            );
+
+            dialog.pack();
+
+            dialog.setLocationRelativeTo(dashboardFrame);
+        };
+
+        
+        
+        Runnable clearPersonalDetails = () -> {
+
+            birthDateField.setText("");
+            pwdIdField.setText("");
+            idTypeCombo.setSelectedIndex(0);
+        };
+
+        
+        
+        Runnable resetDiscount = () -> {
+
+            String selected =
+                (String) discountCombo.getSelectedItem();
+
+            discountValidated[0] = false;
+
+            clearPersonalDetails.run();
+
+            setStatus(seniorStatus, "NOT VALIDATED", red);
+            setStatus(pwdStatus, "NOT VALIDATED", red);
+
+            seniorPanel.setVisible(DISCOUNT_SENIOR.equals(selected));
+            pwdPanel.setVisible(DISCOUNT_PWD.equals(selected));
+
+            refreshSummary.run();
+
+            resizeDialog.run();
+        };
+
         refreshSummary.run();
 
-        // Senior/PWD changed -> recalculate everything
-        seniorCombo.addActionListener(e -> refreshSummary.run());
+        
+        discountCombo.addActionListener(e -> resetDiscount.run());
 
-        // Payment method changed
+        
+        
+        
+        Runnable invalidateDiscount = () -> {
+
+            if (discountValidated[0]) {
+
+                discountValidated[0] = false;
+
+                setStatus(seniorStatus, "NOT VALIDATED", red);
+                setStatus(pwdStatus, "NOT VALIDATED", red);
+
+                refreshSummary.run();
+            }
+        };
+
+        DocumentListener detailsListener = new DocumentListener() {
+
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                invalidateDiscount.run();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                invalidateDiscount.run();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                invalidateDiscount.run();
+            }
+        };
+
+        birthDateField.getDocument().addDocumentListener(detailsListener);
+        pwdIdField.getDocument().addDocumentListener(detailsListener);
+
+        idTypeCombo.addActionListener(e -> invalidateDiscount.run());
+
+        
+
+        validateSeniorButton.addActionListener(e -> {
+
+            String problem = validateSeniorCitizen(
+                birthDateField.getText(), LocalDate.now()
+            );
+
+            if (problem != null) {
+
+                discountValidated[0] = false;
+
+                setStatus(seniorStatus, "NOT VALIDATED", red);
+
+                refreshSummary.run();
+
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    problem,
+                    "Senior Citizen Discount Rejected",
+                    JOptionPane.WARNING_MESSAGE
+                );
+
+                birthDateField.requestFocusInWindow();
+
+                return;
+            }
+
+            discountValidated[0] = true;
+
+            
+            
+
+            setStatus(seniorStatus, "SENIOR CITIZEN VALIDATED", green);
+
+            refreshSummary.run();
+        });
+
+        birthDateField.addActionListener(
+            e -> validateSeniorButton.doClick()
+        );
+
+        
+
+        validatePwdButton.addActionListener(e -> {
+
+            String problem = validatePwdId(pwdIdField.getText());
+
+            if (problem != null) {
+
+                discountValidated[0] = false;
+
+                setStatus(pwdStatus, "NOT VALIDATED", red);
+
+                refreshSummary.run();
+
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    problem,
+                    "PWD Discount Rejected",
+                    JOptionPane.WARNING_MESSAGE
+                );
+
+                pwdIdField.requestFocusInWindow();
+
+                return;
+            }
+
+            discountValidated[0] = true;
+
+            
+            
+
+            setStatus(pwdStatus, "PWD VALIDATED", green);
+
+            refreshSummary.run();
+        });
+
+        pwdIdField.addActionListener(
+            e -> validatePwdButton.doClick()
+        );
+
+        
         paymentCombo.addActionListener(e -> {
 
-            boolean card =
-                "CREDIT".equals(paymentCombo.getSelectedItem());
+            boolean cashless =
+                PAYMENT_CASHLESS.equals(paymentCombo.getSelectedItem());
 
-            paymentField.setEditable(!card);
+            paymentField.setEditable(!cashless);
 
-            if (card) {
+            cashlessPanel.setVisible(cashless);
+
+            referenceField.setText("");
+
+            if (cashless) {
 
                 paymentField.setText(
                     summary[0].total.toPlainString()
                 );
 
+                SwingUtilities.invokeLater(
+                    () -> referenceField.requestFocusInWindow()
+                );
+
             } else {
 
                 paymentField.setText("");
-                paymentField.requestFocusInWindow();
+
+                SwingUtilities.invokeLater(
+                    () -> paymentField.requestFocusInWindow()
+                );
             }
 
             updateChange.run();
+
+            resizeDialog.run();
         });
 
-        // Typing a cash amount updates the change preview
+        
         paymentField.getDocument().addDocumentListener(
             new DocumentListener() {
 
@@ -1967,17 +2341,65 @@ public class CofteaPOSSystem {
             }
         );
 
-        // ---- PROCESS PAYMENT ----
+        
 
         processButton.addActionListener(e -> {
 
             OrderSummary s = summary[0];
 
-            boolean card =
-                "CREDIT".equals(paymentCombo.getSelectedItem());
+            String discountCategory = categoryFromSelection(
+                (String) discountCombo.getSelectedItem()
+            );
 
-            // Card = exact total, cash = what the cashier typed
-            BigDecimal received = card
+            
+            if (!DISCOUNT_NONE.equals(discountCategory)
+                && !discountValidated[0]) {
+
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    "The " + discountCategory + " discount has not "
+                        + "been validated yet.\n\n"
+                        + "Please validate it, or choose "
+                        + NO_DISCOUNT_LABEL + ".",
+                    "Discount Not Validated",
+                    JOptionPane.WARNING_MESSAGE
+                );
+
+                return;
+            }
+
+            boolean cashless =
+                PAYMENT_CASHLESS.equals(paymentCombo.getSelectedItem());
+
+            
+            String reference = null;
+
+            if (cashless) {
+
+                String problem = validateCashlessReference(
+                    referenceField.getText()
+                );
+
+                if (problem != null) {
+
+                    JOptionPane.showMessageDialog(
+                        dialog,
+                        problem,
+                        "Cashless Payment Rejected",
+                        JOptionPane.WARNING_MESSAGE
+                    );
+
+                    referenceField.selectAll();
+                    referenceField.requestFocusInWindow();
+
+                    return;
+                }
+
+                reference = referenceField.getText().trim();
+            }
+
+            
+            BigDecimal received = cashless
                 ? s.total
                 : parseAmount(paymentField.getText());
 
@@ -1996,7 +2418,7 @@ public class CofteaPOSSystem {
                 return;
             }
 
-            // Insufficient: reject and let the cashier try again
+            
             if (received.compareTo(s.total) < 0) {
 
                 JOptionPane.showMessageDialog(
@@ -2016,48 +2438,57 @@ public class CofteaPOSSystem {
                 return;
             }
 
-            // Exact amount -> change is 0.00
-            // Excess amount -> change = received - total
+            
+            
+            
             BigDecimal change =
                 money(received.subtract(s.total));
 
-            String selectedDiscount =
-                (String) seniorCombo.getSelectedItem();
+            String method = cashless ? PAYMENT_CASHLESS : PAYMENT_CASH;
 
-            String discountType =
-                "NO".equals(selectedDiscount)
-                    ? "NONE"
-                    : selectedDiscount;
-
-            String method = card ? "CREDIT" : "CASH";
-
-            // Payment is valid: finalize the transaction
+            
+            
             TransactionRecord record = completeTransaction(
-                s, discountType, method, received, change
+                s, discountCategory, method, reference,
+                received, change
             );
+
+            
+            clearPersonalDetails.run();
+            referenceField.setText("");
 
             dialog.dispose();
 
-            // Save the .txt receipt automatically (payment is already
-            // validated and the transaction is already finalized here)
+            
+            
             saveReceiptFileAutomatically(record);
 
-            // The receipt is built from the saved transaction data
+            
             openReceiptWindow(record);
         });
 
-        // Pressing Enter in the amount field processes the payment
+        
+        
         paymentField.addActionListener(
             e -> processButton.doClick()
         );
 
-        cancelButton.addActionListener(e -> dialog.dispose());
+        referenceField.addActionListener(
+            e -> processButton.doClick()
+        );
+
+        
+        cancelButton.addActionListener(e -> {
+
+            clearPersonalDetails.run();
+            referenceField.setText("");
+
+            dialog.dispose();
+        });
 
         dialog.setContentPane(root);
 
-        dialog.pack();
-
-        dialog.setLocationRelativeTo(dashboardFrame);
+        resizeDialog.run();
 
         SwingUtilities.invokeLater(
             () -> paymentField.requestFocusInWindow()
@@ -2066,22 +2497,22 @@ public class CofteaPOSSystem {
         dialog.setVisible(true);
     }
 
-    // ------------------------------------------
-    // VAT AND SENIOR/PWD CALCULATION
-    // ------------------------------------------
-    //
-    // VAT and the discount are kept separate:
-    //
-    //  Regular items (no ID):
-    //      VAT-exclusive amount = price / 1.12   (if prices include VAT)
-    //      VAT                  = 12% of that amount
-    //
-    //  Eligible items (valid Senior/PWD ID):
-    //      VAT-exempt, so VAT = 0
-    //      discount = 20% of the VAT-exclusive amount
-    //
-    //  Total = subtotal + VAT - discount
-    //
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     private OrderSummary calculateSummary(
         List<OrderLine> lines,
         boolean seniorOrPwd
@@ -2101,7 +2532,7 @@ public class CofteaPOSSystem {
             }
         }
 
-        // Regular items: 12% VAT applies
+        
         BigDecimal regularNet;
         BigDecimal regularVat;
 
@@ -2113,7 +2544,7 @@ public class CofteaPOSSystem {
                 )
             );
 
-            // Remainder, so net + VAT always equals the price paid
+            
             regularVat = money(regularGross.subtract(regularNet));
 
         } else {
@@ -2125,7 +2556,7 @@ public class CofteaPOSSystem {
             );
         }
 
-        // Eligible items: VAT-exempt, discount on the VAT-exclusive amount
+        
         BigDecimal eligibleNet;
 
         if (PRICES_INCLUDE_VAT) {
@@ -2156,39 +2587,41 @@ public class CofteaPOSSystem {
         return new OrderSummary(subtotal, tax, discount, total);
     }
 
-    // ------------------------------------------
-    // FINALIZE A PAID TRANSACTION
-    // ------------------------------------------
+    
+    
+    
 
     private TransactionRecord completeTransaction(
         OrderSummary summary,
-        String discountType,
+        String discountCategory,
         String paymentMethod,
+        String cashlessReference,
         BigDecimal amountReceived,
         BigDecimal change
     ) {
 
         transactionCounter++;
 
-        // Copy the order so the record stays complete after
-        // the dashboard order is cleared
+        
+        
         TransactionRecord record = new TransactionRecord(
             transactionCounter,
             LocalDateTime.now(),
             new ArrayList<>(orderLines),
             summary,
-            discountType,
+            discountCategory,
             paymentMethod,
+            cashlessReference,
             amountReceived,
             change
         );
 
         transactions.add(record);
 
-        // The receipt will be built from this
+        
         lastTransaction = record;
 
-        // Start a fresh order
+        
         orderLines.clear();
         orderTableModel.setRowCount(0);
 
@@ -2197,11 +2630,11 @@ public class CofteaPOSSystem {
         return record;
     }
 
-    // ------------------------------------------
-    // CASHOUT WINDOW HELPERS
-    // ------------------------------------------
+    
+    
+    
 
-    // "LABEL:                 ₱0.00"
+    
     private JPanel createValueRow(
         String labelText,
         JLabel valueLabel
@@ -2225,7 +2658,7 @@ public class CofteaPOSSystem {
         return row;
     }
 
-    // White rounded input box with a black outline
+    
     private RoundedPanel createInputBox(
         JComponent inner,
         int height
@@ -2248,10 +2681,101 @@ public class CofteaPOSSystem {
         return box;
     }
 
-    // Flat, centered combo box that sits inside a rounded box
-    private void styleComboBox(JComboBox<String> combo) {
+    
+    private JLabel createSubHeading(String text) {
 
-        // The UI must be set first, otherwise it resets our styling
+        JLabel label = new JLabel(text);
+
+        label.setFont(new Font("Arial", Font.BOLD, 20));
+        label.setForeground(Color.BLACK);
+
+        return label;
+    }
+
+    
+    private JLabel createStatusLabel() {
+
+        JLabel label = new JLabel("", SwingConstants.CENTER);
+
+        label.setFont(new Font("Arial", Font.BOLD, 16));
+
+        return label;
+    }
+
+    private void setStatus(JLabel label, String text, Color color) {
+
+        label.setText(text);
+        label.setForeground(color);
+    }
+
+    
+    private JTextField createTextInput(
+        int fontSize,
+        String allowedPattern
+    ) {
+
+        JTextField field = new JTextField();
+
+        field.setFont(new Font("Arial", Font.BOLD, fontSize));
+        field.setHorizontalAlignment(SwingConstants.CENTER);
+        field.setBorder(null);
+        field.setBackground(white);
+        field.setForeground(Color.BLACK);
+        field.setCaretColor(Color.BLACK);
+
+        ((AbstractDocument) field.getDocument())
+            .setDocumentFilter(new PatternFilter(allowedPattern));
+
+        return field;
+    }
+
+    private RoundedButton createValidateButton() {
+
+        RoundedButton button = new RoundedButton("VALIDATE", blue);
+
+        button.setFont(new Font("Arial", Font.BOLD, 20));
+        button.setPreferredSize(new Dimension(150, 50));
+
+        return button;
+    }
+
+    
+    private JPanel createEntryRow(JTextField field, JButton button) {
+
+        JPanel entryRow = new JPanel(new BorderLayout(10, 0));
+
+        entryRow.setOpaque(false);
+
+        entryRow.add(createInputBox(field, 50), BorderLayout.CENTER);
+        entryRow.add(button, BorderLayout.EAST);
+
+        return entryRow;
+    }
+
+    
+    private GridBagConstraints rowConstraints(int row, Insets insets) {
+
+        GridBagConstraints c = new GridBagConstraints();
+
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 1.0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        c.anchor = GridBagConstraints.NORTHWEST;
+        c.insets = insets;
+
+        return c;
+    }
+
+    
+    private void styleComboBox(JComboBox<String> combo) {
+        styleComboBox(combo, 24);
+    }
+
+    
+    private void styleComboBox(JComboBox<String> combo, int fontSize) {
+
+        
         combo.setUI(new BasicComboBoxUI() {
 
             @Override
@@ -2270,12 +2794,12 @@ public class CofteaPOSSystem {
             }
         });
 
-        combo.setFont(new Font("Arial", Font.BOLD, 24));
+        combo.setFont(new Font("Arial", Font.BOLD, fontSize));
         combo.setBackground(white);
         combo.setForeground(Color.BLACK);
         combo.setBorder(null);
 
-        // Prevents the blue "focused" highlight on the shown value
+        
         combo.setFocusable(false);
 
         combo.setCursor(new Cursor(Cursor.HAND_CURSOR));
@@ -2298,7 +2822,7 @@ public class CofteaPOSSystem {
                     );
 
                 label.setHorizontalAlignment(SwingConstants.CENTER);
-                label.setFont(new Font("Arial", Font.BOLD, 24));
+                label.setFont(new Font("Arial", Font.BOLD, fontSize));
 
                 label.setBorder(
                     BorderFactory.createEmptyBorder(6, 6, 6, 6)
@@ -2309,21 +2833,21 @@ public class CofteaPOSSystem {
         });
     }
 
-    // ------------------------------------------
-    // MONEY HELPERS
-    // ------------------------------------------
+    
+    
+    
 
-    // Always 2 decimal places, standard rounding
+    
     private static BigDecimal money(BigDecimal value) {
         return value.setScale(2, RoundingMode.HALF_UP);
     }
 
-    // "₱1,234.50"
+    
     private static String peso(BigDecimal amount) {
         return "₱" + String.format(Locale.US, "%,.2f", amount);
     }
 
-    // Returns null if the text is empty or not a number
+    
     private static BigDecimal parseAmount(String text) {
 
         if (text == null) {
@@ -2343,7 +2867,7 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Allows only digits and up to 2 decimal places
+    
     private static class AmountFilter extends DocumentFilter {
 
         private boolean isValid(String text) {
@@ -2397,12 +2921,231 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 13C. RECEIPT
-    // ==========================================
+    
+    
+    
+    
+    
+    
+    
+    
 
-    // Shows the receipt of a paid transaction.
-    // Only called after payment has been validated and saved.
+    
+    private static final DateTimeFormatter BIRTH_DATE_FORMAT =
+        DateTimeFormatter
+            .ofPattern("MM/dd/uuuu", Locale.US)
+            .withResolverStyle(ResolverStyle.STRICT);
+
+    
+    private static String categoryFromSelection(String selection) {
+
+        if (DISCOUNT_SENIOR.equals(selection)
+            || DISCOUNT_PWD.equals(selection)) {
+
+            return selection;
+        }
+
+        return DISCOUNT_NONE;
+    }
+
+    
+    private static LocalDate parseBirthDate(String text) {
+
+        if (text == null) {
+            return null;
+        }
+
+        try {
+
+            LocalDate date =
+                LocalDate.parse(text.trim(), BIRTH_DATE_FORMAT);
+
+            
+            return date.getYear() < 1900 ? null : date;
+
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
+    }
+
+    
+    private static int calculateAge(
+        LocalDate birthDate,
+        LocalDate today
+    ) {
+        return Period.between(birthDate, today).getYears();
+    }
+
+    
+    private static String validateSeniorCitizen(
+        String birthDateText,
+        LocalDate today
+    ) {
+
+        String trimmed =
+            birthDateText == null ? "" : birthDateText.trim();
+
+        if (trimmed.isEmpty()) {
+
+            return "Please enter the customer's birth date "
+                + "(MM/DD/YYYY).";
+        }
+
+        LocalDate birthDate = parseBirthDate(trimmed);
+
+        if (birthDate == null) {
+
+            return "Invalid birth date.\n\n"
+                + "Please use the format MM/DD/YYYY "
+                + "(for example 03/15/1950).";
+        }
+
+        if (birthDate.isAfter(today)) {
+            return "The birth date cannot be in the future.";
+        }
+
+        int age = calculateAge(birthDate, today);
+
+        if (age < SENIOR_MIN_AGE) {
+
+            return "Senior Citizen discount rejected.\n\n"
+                + "The customer is " + age + " year(s) old. "
+                + "The customer must be at least "
+                + SENIOR_MIN_AGE + " years old to qualify.";
+        }
+
+        return null;
+    }
+
+    
+    private static String validatePwdId(String idNumber) {
+
+        String trimmed = idNumber == null ? "" : idNumber.trim();
+
+        if (trimmed.isEmpty()) {
+            return "Please enter the customer's PWD ID number.";
+        }
+
+        if (!DEMO_PWD_ID.equals(trimmed)) {
+
+            return "PWD discount rejected.\n\n"
+                + "The PWD ID number entered is not valid.";
+        }
+
+        return null;
+    }
+
+    
+    private static String validateCashlessReference(String reference) {
+
+        String trimmed = reference == null ? "" : reference.trim();
+
+        if (trimmed.isEmpty()) {
+
+            return "Please enter the reference number provided by "
+                + "the customer.\n\n"
+                + "The transaction cannot be completed without it.";
+        }
+
+        if (!DEMO_CASHLESS_REFERENCE.equals(trimmed)) {
+
+            return "Invalid reference number.\n\n"
+                + "The payment was rejected. Please check the "
+                + "reference number and try again.";
+        }
+
+        return null;
+    }
+
+    
+    private static String discountAmountLabel(String category) {
+
+        if (DISCOUNT_SENIOR.equals(category)) {
+            return "Senior Citizen Discount:";
+        }
+
+        if (DISCOUNT_PWD.equals(category)) {
+            return "PWD Discount:";
+        }
+
+        return "Discount:";
+    }
+
+    
+    private static String discountAmountText(BigDecimal discount) {
+
+        return discount.signum() > 0
+            ? "-" + peso(discount)
+            : peso(discount);
+    }
+
+    
+    
+    private static class PatternFilter extends DocumentFilter {
+
+        private final Pattern allowed;
+
+        PatternFilter(String regex) {
+            this.allowed = Pattern.compile(regex);
+        }
+
+        private boolean isValid(String text) {
+            return allowed.matcher(text).matches();
+        }
+
+        @Override
+        public void insertString(
+            FilterBypass fb,
+            int offset,
+            String string,
+            AttributeSet attr
+        ) throws BadLocationException {
+
+            String current = fb.getDocument().getText(
+                0, fb.getDocument().getLength()
+            );
+
+            String next = new StringBuilder(current)
+                .insert(offset, string)
+                .toString();
+
+            if (isValid(next)) {
+                super.insertString(fb, offset, string, attr);
+            }
+        }
+
+        @Override
+        public void replace(
+            FilterBypass fb,
+            int offset,
+            int length,
+            String text,
+            AttributeSet attrs
+        ) throws BadLocationException {
+
+            String current = fb.getDocument().getText(
+                0, fb.getDocument().getLength()
+            );
+
+            String next = new StringBuilder(current)
+                .replace(
+                    offset, offset + length,
+                    text == null ? "" : text
+                )
+                .toString();
+
+            if (isValid(next)) {
+                super.replace(fb, offset, length, text, attrs);
+            }
+        }
+    }
+
+    
+    
+    
+
+    
+    
     private void openReceiptWindow(TransactionRecord record) {
 
         JDialog dialog = new JDialog(dashboardFrame, "Receipt", true);
@@ -2432,7 +3175,7 @@ public class CofteaPOSSystem {
 
         scrollPane.getVerticalScrollBar().setUnitIncrement(20);
 
-        // Tall receipts scroll instead of growing past the screen
+        
         Dimension receiptSize = receipt.getPreferredSize();
 
         scrollPane.setPreferredSize(
@@ -2444,7 +3187,7 @@ public class CofteaPOSSystem {
 
         dialog.add(scrollPane, BorderLayout.CENTER);
 
-        // DONE button (outside the receipt, so it is never printed)
+        
 
         RoundedButton doneButton =
             new RoundedButton("DONE", green);
@@ -2474,9 +3217,9 @@ public class CofteaPOSSystem {
         dialog.setVisible(true);
     }
 
-    // Draws the receipt following the reference layout.
-    // paintReceipt() draws onto any Graphics2D (screen, image or
-    // printer), so the same drawing can be reused for printing.
+    
+    
+    
     private class ReceiptPanel extends JPanel {
 
         private final int receiptWidth = 440;
@@ -2491,7 +3234,7 @@ public class CofteaPOSSystem {
 
             setOpaque(false);
 
-            // Measure the receipt once so the panel is the right height
+            
             BufferedImage scratch = new BufferedImage(
                 1, 1, BufferedImage.TYPE_INT_ARGB
             );
@@ -2517,12 +3260,12 @@ public class CofteaPOSSystem {
                 RenderingHints.VALUE_ANTIALIAS_ON
             );
 
-            // Keep the receipt centered if the window is wider
+            
             int x = Math.max(4, (getWidth() - receiptWidth) / 2);
 
             g2.translate(x, 4);
 
-            // Paper with a rounded black outline
+            
             g2.setColor(Color.WHITE);
 
             g2.fillRoundRect(
@@ -2541,7 +3284,7 @@ public class CofteaPOSSystem {
             g2.dispose();
         }
 
-        // Draws all receipt text and returns the total receipt height.
+        
         int paintReceipt(Graphics2D g2) {
 
             g2.setRenderingHint(
@@ -2570,7 +3313,7 @@ public class CofteaPOSSystem {
 
             int y = 22;
 
-            // ---- TITLE ----
+            
 
             g2.setFont(titleFont);
 
@@ -2583,7 +3326,7 @@ public class CofteaPOSSystem {
 
             y += fm.getHeight() + 4;
 
-            // ---- BODY ----
+            
 
             g2.setFont(bodyFont);
 
@@ -2593,7 +3336,7 @@ public class CofteaPOSSystem {
 
             y = drawDashes(g2, left, right, y, lineH);
 
-            // ---- DATE / TIME / ORDER NUMBER ----
+            
 
             DateTimeFormatter dateFormat =
                 DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US);
@@ -2624,8 +3367,8 @@ public class CofteaPOSSystem {
 
             y = drawDashes(g2, left, right, y, lineH);
 
-            // ---- ITEMS ----
-            // "2 x Original Latte (12 OZ - Espresso)      ₱98.00"
+            
+            
 
             int priceWidth = 0;
 
@@ -2668,7 +3411,7 @@ public class CofteaPOSSystem {
 
                     } else {
 
-                        // Wrapped lines line up under the item name
+                        
                         g2.drawString(
                             parts.get(i), left + prefixWidth, baseline
                         );
@@ -2680,7 +3423,7 @@ public class CofteaPOSSystem {
 
             y = drawDashes(g2, left, right, y, lineH);
 
-            // ---- TOTALS ----
+            
 
             y = drawRow(
                 g2, "Subtotal:", peso(transaction.subtotal),
@@ -2692,15 +3435,18 @@ public class CofteaPOSSystem {
                 left, right, y, lineH
             );
 
-            // Senior/PWD line only appears when a discount was applied
-            if (transaction.discount.signum() > 0) {
+            
+            
+            y = drawRow(
+                g2, "Discount Category:", transaction.discountCategory,
+                left, right, y, lineH
+            );
 
-                y = drawRow(
-                    g2, "Senior/PWD Discount:",
-                    "-" + peso(transaction.discount),
-                    left, right, y, lineH
-                );
-            }
+            y = drawRow(
+                g2, discountAmountLabel(transaction.discountCategory),
+                discountAmountText(transaction.discount),
+                left, right, y, lineH
+            );
 
             y = drawRow(
                 g2, "Total amount:", peso(transaction.total),
@@ -2719,7 +3465,7 @@ public class CofteaPOSSystem {
 
             y = drawDashes(g2, left, right, y, lineH);
 
-            // ---- PAYMENT METHOD ----
+            
 
             String method = transaction.paymentMethod;
 
@@ -2731,12 +3477,12 @@ public class CofteaPOSSystem {
                 left, right, y, lineH
             );
 
-            // Blank space before the footer line, like the reference
+            
             y += lineH / 2;
 
             y = drawDashes(g2, left, right, y, lineH);
 
-            // ---- FOOTER ----
+            
 
             g2.setFont(footerFont);
 
@@ -2758,11 +3504,11 @@ public class CofteaPOSSystem {
 
             y += footerH;
 
-            // Bottom padding
+            
             return y + 14;
         }
 
-        // ---- small drawing helpers ----
+        
 
         private void drawCentered(
             Graphics2D g2, String text, int centerX, int baseline
@@ -2780,13 +3526,13 @@ public class CofteaPOSSystem {
             g2.drawString(text, rightX - width, baseline);
         }
 
-        // Line of dashes the width of the receipt, like the reference
+        
         private int drawDashes(
             Graphics2D g2, int left, int right, int y, int lineH
         ) {
             FontMetrics fm = g2.getFontMetrics();
 
-            // Fractional width, so the line never runs past the margin
+            
             double dashWidth =
                 fm.getStringBounds("-", g2).getWidth();
 
@@ -2805,7 +3551,7 @@ public class CofteaPOSSystem {
             return y + lineH;
         }
 
-        // "Date:   01/30/2000"
+        
         private int drawLabelValue(
             Graphics2D g2,
             String label,
@@ -2823,7 +3569,7 @@ public class CofteaPOSSystem {
             return y + lineH;
         }
 
-        // "Subtotal:                    ₱87.50"
+        
         private int drawRow(
             Graphics2D g2,
             String label,
@@ -2843,7 +3589,7 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Splits text into lines that fit maxWidth (breaks at spaces)
+    
     private static List<String> wrapText(
         String text,
         FontMetrics fm,
@@ -2856,7 +3602,7 @@ public class CofteaPOSSystem {
 
         for (String word : text.split(" ")) {
 
-            // A single word wider than the line is broken up
+            
             while (fm.stringWidth(word) > maxWidth
                 && word.length() > 1) {
 
@@ -2907,20 +3653,20 @@ public class CofteaPOSSystem {
         return lines;
     }
 
-    // ==========================================
-    // 13D. AUTOMATIC TEXT FILE RECEIPT
-    // ==========================================
+    
+    
+    
 
-    // Folder where every receipt .txt file is saved
+    
     private static final Path RECEIPT_FOLDER = Paths.get(
         "C:\\Users\\gonza\\OneDrive\\Desktop\\COFTEA_POS\\receipt"
     );
 
-    // Characters per line in the text receipt
+    
     private static final int TEXT_RECEIPT_WIDTH = 42;
 
-    // Saves the receipt file and shows an error if it fails.
-    // The payment itself is already completed at this point.
+    
+    
     private void saveReceiptFileAutomatically(
         TransactionRecord record
     ) {
@@ -2943,13 +3689,13 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Writes one NEW file per transaction. Existing files are never
-    // overwritten: CREATE_NEW fails if the name is already taken,
-    // and the next free name is used instead.
+    
+    
+    
     private Path saveReceiptToFile(TransactionRecord t)
         throws IOException {
 
-        // Creates the folder (and parents) only if it is missing
+        
         Files.createDirectories(RECEIPT_FOLDER);
 
         String stamp = t.dateTime.format(
@@ -2985,7 +3731,7 @@ public class CofteaPOSSystem {
                 return file;
 
             } catch (FileAlreadyExistsException ex) {
-                // Name already used: try the next suffix
+                
             }
         }
 
@@ -2994,7 +3740,7 @@ public class CofteaPOSSystem {
         );
     }
 
-    // Builds the same content as the receipt window, as plain text
+    
     private static String buildReceiptText(TransactionRecord t) {
 
         final int w = TEXT_RECEIPT_WIDTH;
@@ -3020,7 +3766,7 @@ public class CofteaPOSSystem {
 
         sb.append(dashes).append(nl);
 
-        // ---- ITEMS ----
+        
 
         int priceWidth = 0;
 
@@ -3054,7 +3800,7 @@ public class CofteaPOSSystem {
                 sb.append(nl);
             }
 
-            // Individual price, shown when more than one cup
+            
             if (line.quantity > 1) {
                 sb.append(indent).append("@ ")
                     .append(peso(line.getUnitPrice()))
@@ -3064,18 +3810,21 @@ public class CofteaPOSSystem {
 
         sb.append(dashes).append(nl);
 
-        // ---- TOTALS ----
+        
 
         sb.append(textRow("Subtotal:", peso(t.subtotal), w)).append(nl);
         sb.append(textRow("12% VAT:", peso(t.tax), w)).append(nl);
 
-        // Senior/PWD line only appears when a discount was applied
-        if (t.discount.signum() > 0) {
-            sb.append(textRow(
-                "Senior/PWD Discount:",
-                "-" + peso(t.discount), w
-            )).append(nl);
-        }
+        
+        
+        sb.append(textRow(
+            "Discount Category:", t.discountCategory, w
+        )).append(nl);
+
+        sb.append(textRow(
+            discountAmountLabel(t.discountCategory),
+            discountAmountText(t.discount), w
+        )).append(nl);
 
         sb.append(textRow("Total amount:", peso(t.total), w)).append(nl);
         sb.append(textRow("Paid:", peso(t.amountReceived), w)).append(nl);
@@ -3083,7 +3832,7 @@ public class CofteaPOSSystem {
 
         sb.append(dashes).append(nl);
 
-        // ---- PAYMENT METHOD ----
+        
 
         String method = t.paymentMethod.substring(0, 1)
             + t.paymentMethod.substring(1).toLowerCase();
@@ -3093,7 +3842,7 @@ public class CofteaPOSSystem {
         sb.append(nl);
         sb.append(dashes).append(nl);
 
-        // ---- FOOTER ----
+        
 
         sb.append(centerText("Thank You! Come", w)).append(nl);
         sb.append(centerText("Again Soon!", w)).append(nl);
@@ -3101,7 +3850,7 @@ public class CofteaPOSSystem {
         return sb.toString();
     }
 
-    // "label ........ value" padded to the receipt width
+    
     private static String textRow(
         String left, String right, int width
     ) {
@@ -3128,7 +3877,7 @@ public class CofteaPOSSystem {
         return sb.toString();
     }
 
-    // Plain-text word wrap (the receipt window uses pixel widths instead)
+    
     private static List<String> wrapPlain(String text, int maxWidth) {
 
         List<String> lines = new ArrayList<>();
@@ -3137,7 +3886,7 @@ public class CofteaPOSSystem {
 
         for (String word : text.split(" ")) {
 
-            // A single word longer than the line is broken up
+            
             while (word.length() > maxWidth) {
 
                 if (current.length() > 0) {
@@ -3176,9 +3925,9 @@ public class CofteaPOSSystem {
         return lines;
     }
 
-    // ==========================================
-    // 14. CATEGORY BUTTON DESIGN
-    // ==========================================
+    
+    
+    
 
     private JButton createCategoryButton(
         String text
@@ -3204,9 +3953,9 @@ public class CofteaPOSSystem {
         return button;
     }
 
-    // ==========================================
-    // 15. DASHBOARD BUTTON DESIGN
-    // ==========================================
+    
+    
+    
 
     private JButton createDashboardButton(
         String text,
@@ -3233,9 +3982,9 @@ public class CofteaPOSSystem {
         return button;
     }
 
-    // ==========================================
-    // 16. CIRCULAR SIZE-SELECTION BUTTON
-    // ==========================================
+    
+    
+    
 
     private class CircleSelectionButton extends JButton {
 
@@ -3278,7 +4027,7 @@ public class CofteaPOSSystem {
             int x = (getWidth() - diameter) / 2;
             int y = (getHeight() - diameter) / 2;
 
-            // Circle background
+            
 
             g2.setColor(selected ? green : white);
 
@@ -3286,7 +4035,7 @@ public class CofteaPOSSystem {
                 x, y, diameter, diameter
             );
 
-            // Circle outline
+            
 
             g2.setColor(Color.BLACK);
 
@@ -3298,7 +4047,7 @@ public class CofteaPOSSystem {
                 x, y, diameter, diameter
             );
 
-            // Selected checkmark
+            
 
             if (selected) {
 
@@ -3330,9 +4079,9 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 17. LOGO DESIGN
-    // ==========================================
+    
+    
+    
 
     private class LogoPanel extends JPanel {
 
@@ -3358,7 +4107,7 @@ public class CofteaPOSSystem {
                 RenderingHints.VALUE_ANTIALIAS_ON
             );
 
-            // CIRCULAR BACKGROUND
+            
 
             g2.setColor(
                 new Color(241, 236, 229)
@@ -3366,7 +4115,7 @@ public class CofteaPOSSystem {
 
             g2.fillOval(0, 0, 100, 100);
 
-            // LOGO TEXT
+            
 
             g2.setFont(
                 new Font("Serif", Font.PLAIN, 25)
@@ -3390,7 +4139,7 @@ public class CofteaPOSSystem {
 
             g2.drawString("tea", 53, 64);
 
-            // CAFE TEXT
+            
 
             g2.setFont(
                 new Font("Arial", Font.PLAIN, 7)
@@ -3408,11 +4157,11 @@ public class CofteaPOSSystem {
         }
     }
 
-    // ==========================================
-    // 18. ADD-ON WINDOW COMPONENTS
-    // ==========================================
+    
+    
+    
 
-    // Panel with rounded corners, optional rounded border
+    
     private class RoundedPanel extends JPanel {
 
         private final Color fill;
@@ -3474,7 +4223,7 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Rounded pill toggle used for each add-on
+    
     private class PillToggle extends JToggleButton {
 
         PillToggle() {
@@ -3529,7 +4278,7 @@ public class CofteaPOSSystem {
         }
     }
 
-    // Rounded ADD / CANCEL buttons
+    
     private class RoundedButton extends JButton {
 
         private final Color buttonColor;
